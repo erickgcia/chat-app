@@ -1,4 +1,5 @@
-import { ChangeEvent, FormEvent, useState } from 'react'
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react'
+import { CreateMLCEngine, MLCEngine } from '@mlc-ai/web-llm'
 
 interface Message {
   message: string
@@ -7,15 +8,73 @@ interface Message {
 
 export function App() {
   const [message, setMessage] = useState<string>('')
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      message: 'What do you want to know?',
+      sender: 'bot',
+    },
+  ])
+  const [engine, setEngine] = useState<MLCEngine | null>(null)
+  const boxRef = useRef<HTMLUListElement>(null)
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    const initializeEngine = async () => {
+      try {
+        const selectedModel = 'gemma-2b-it-q4f32_1-MLC'
+        const createdEngine = await CreateMLCEngine(selectedModel, {
+          initProgressCallback: (info) => {
+            console.log(info)
+          },
+        })
+        setEngine(createdEngine)
+      } catch (error) {
+        console.error('Error initializing engine:', error)
+      }
+    }
+
+    initializeEngine()
+  }, [])
+
+  useEffect(() => {
+    if (boxRef.current) {
+      boxRef.current.scrollTop = boxRef.current.scrollHeight
+    }
+  }, [messages])
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     const trimmedMsg = message.trim()
     if (trimmedMsg !== '') {
-      setMessages([...messages, { message: trimmedMsg, sender: 'user' }])
+      setMessages((prevMessages) => [
+        ...prevMessages,
+        { message: trimmedMsg, sender: 'user' },
+      ])
       setMessage('')
+
+      if (engine) {
+        try {
+          const reply = await engine.chat.completions.create({
+            messages: messages.map((msg) => ({
+              role: msg.sender === 'user' ? 'user' : 'system',
+              content: msg.message,
+            })),
+          })
+
+          const botAnswer = reply.choices[0].message.content
+
+          if (typeof botAnswer === 'string') {
+            setMessages((prevMessages) => [
+              ...prevMessages,
+              { message: botAnswer, sender: 'bot' },
+            ])
+          } else {
+            console.error('Invalid bot response:', botAnswer)
+          }
+        } catch (error) {
+          console.error('Error fetching bot reply:', error)
+        }
+      }
     }
   }
 
@@ -26,7 +85,7 @@ export function App() {
   return (
     <main>
       <article>
-        <ul className="box">
+        <ul ref={boxRef} className="box">
           {messages.map((msg, index) => (
             <li key={index} className={`message message--${msg.sender}`}>
               <span
